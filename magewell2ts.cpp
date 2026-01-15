@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (c) 2022-2025 John Patrick Poet
  *
  * Permission is hereby granted, free of charge, to any person
@@ -124,7 +124,7 @@ int main(int argc, char* argv[])
 
     string_view app_name = argv[0];
     string      edid_file;
-    string      video_codec = "hevc_nvenc";
+    string      video_codec = "libx264";
     string      device      = "renderD128";
 
     bool        get_volume  = false;
@@ -136,7 +136,7 @@ int main(int argc, char* argv[])
     bool        write_edid  = false;
 
     string      preset;
-    int         quality       = 25;
+    int         quality       = 20;
     int         look_ahead    = -1;
     bool        no_audio      = false;
     bool        p010          = false;

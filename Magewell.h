@@ -50,7 +50,8 @@ class Magewell
 
   private:
     bool describe_input(HCHANNEL channel);
-
+    enum EncoderType { UNKNOWN, NV, VAAPI, QSV, X264 };
+    
     bool update_HDRcolorspace(MWCAP_VIDEO_SIGNAL_STATUS signal_status);
     bool update_HDRframe(void);
     bool update_HDRinfo(void);
@@ -123,7 +124,8 @@ class Magewell
     std::chrono::high_resolution_clock::time_point m_last_reset;
 
     std::function<bool (void)>  f_open_video;
-
+    bool open_x264(AVCodecContext *c);
+    int x264_encode(AVCodecContext *enc, AVFrame *frame, AVPacket *pkt);
     bool m_isEco   {false};
     bool m_isHDR   {false};
     bool m_p010    {false};

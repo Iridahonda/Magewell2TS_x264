@@ -1,4 +1,4 @@
-﻿/*
+/*
  * magewell2ts
  * Copyright (c) 2022-2025 John Patrick Poet
  *
@@ -1933,6 +1933,7 @@ void Magewell::capture_pro_video(MWCAP_VIDEO_ECO_CAPTURE_OPEN eco_params,
             pro_image_buffer_available(pbImage, nullptr);
             continue;
         }
+        
 
         if (!m_out2ts->AddVideoFrame(pbImage, nullptr,
                                      m_num_pixels, timestamp))
@@ -2089,25 +2090,19 @@ bool Magewell::capture_video(void)
         }
         else /* if (m_out2ts->isHDR()) */
         {
-            color_changed = update_HDRcolorspace(videoSignalStatus);
-
-            if (m_p010)
-                eco_params.dwFOURCC = MWFOURCC_P010;
-            else if (m_out2ts->encoderType() == OutputTS::QSV ||
-                     m_out2ts->encoderType() == OutputTS::VAAPI)
+            if (m_out2ts->encoderType() == OutputTS::QSV || m_out2ts->encoderType() == OutputTS::VAAPI)
                 eco_params.dwFOURCC = MWFOURCC_NV12;
             else if (m_out2ts->encoderType() == OutputTS::NV)
-                eco_params.dwFOURCC = MWFOURCC_I420;
+                eco_params.dwFOURCC = MWFOURCC_I422;
+            else if (m_out2ts->encoderType() == OutputTS::X264)
+                eco_params.dwFOURCC = MWFOURCC_YUY2; // Select planar 4:2:2 for x264
             else
             {
-                cerr << lock_ios()
-                     << "ERROR: Failed to determine best magewell pixel format.\n";
+                cerr << lock_ios() << "ERROR: Failed to determine best magewell pixel format.\n";
                 Shutdown();
             }
-
             m_isHDR = false;
         }
-
         if (eco_params.cx != videoSignalStatus.cx)
         {
             if (m_verbose > 1)

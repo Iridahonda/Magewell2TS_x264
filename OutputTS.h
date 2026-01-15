@@ -21,11 +21,11 @@ extern "C" {
 class OutputTS
 {
   public:
+    enum EncoderType { UNKNOWN, NV, VAAPI, QSV, X264 };
     using MagCallback = std::function<void (uint8_t*, void*)>;
     using ResetCallback = std::function<void (void)>;
     using ShutdownCallback = std::function<void (void)>;
 
-    enum EncoderType { UNKNOWN, NV, VAAPI, QSV };
 
     OutputTS(int verbose, const std::string & video_codec_name,
              const std::string & preset, int quality, int look_ahead,
@@ -59,56 +59,55 @@ class OutputTS
     void ClearVideoPool(void);
     void ClearImageQueue(void);
     void DiscardImages(bool val);
-    bool AddVideoFrame(uint8_t*  pImage, void* pEco,
+    bool AddVideoFrame(uint8_t* pImage, void* pEco,
                        int imageSize, int64_t timestamp);
 
   private:
+
     void mux(void);
     void copy_to_frame(void);
 
-    // a wrapper around a single output AVStream
-    using OutputStream = struct {
-        AVBufferRef* hw_device_ctx {nullptr};
-        bool         hw_device     {false};
+    // A wrapper around a single output AVStream
+    struct OutputStream {
+            AVBufferRef* hw_device_ctx {nullptr};
+            bool         hw_device     {false};
 
-        AVStream* st               {nullptr};
-        AVCodecContext* enc        {nullptr};
+            AVStream* st               {nullptr};
+            AVCodecContext* enc        {nullptr};
 
-        /* pts of the next frame that will be generated */
-        int64_t next_pts           {-1};
-        int64_t timestamp          {-1};
-#if 1
-        int64_t next_timestamp     {-1};
-#endif
+            int64_t next_pts           {-1};
+            int64_t timestamp          {-1};
+    #if 1
+            int64_t next_timestamp     {-1};
+    #endif
 
-        using FramePool = struct {
-            AVFrame* frame     {nullptr};
-            int64_t  timestamp {-1};
-        };
+            // Structure to hold buffered frames
+            struct Frame {
+                AVFrame* frame     {nullptr};
+                int64_t  timestamp {-1};
+            };
 
-        FramePool* frames          {nullptr};
+            Frame* frames              {nullptr};
 
-        int frames_idx_in          {-1};
-        int frames_idx_out         {-1};
-        int frames_total           {10};
-        int frames_used            {0};
-
-        int samples_count          {0};
-        AVFrame* frame             {nullptr};
-        AVFrame* tmp_frame         {nullptr};
-#if 0
-        int64_t  prev_pts          {-1};
-#endif
-        int64_t  prev_dts          {-1};
-        AVPacket* tmp_pkt          {nullptr};
-
-        struct SwrContext* swr_ctx {nullptr};
+            int frames_idx_in          {-1};
+            int frames_idx_out         {-1};
+            int frames_total           {10};
+            int frames_used            {0};
+            
+            int samples_count          {0};
+            
+            // Pointer to the current frame being processed (distinct from the pool above)
+            AVFrame* frame             {nullptr};
+            AVFrame* tmp_frame         {nullptr};
+            int64_t  prev_dts          {-1};
+            AVPacket* tmp_pkt          {nullptr};
+            struct SwrContext* swr_ctx {nullptr};
     };
-
+    
     using imagepkt_t = struct {
         int64_t  timestamp;
         uint8_t* image;
-        void*    pEco;
+        void* pEco;
         int      image_size;
     };
     using imageque_t = std::deque<imagepkt_t>;
@@ -148,14 +147,17 @@ class OutputTS
     bool nv_encode(void);
     bool qsv_vaapi_encode(void);
 
+    bool open_x264(const AVCodec* codec, OutputStream* ost, AVDictionary* opt_arg);
+    bool x264_encode(void);
+
     EncoderType     m_encoderType  { UNKNOWN };
 
-    AudioIO*        m_audioIO {nullptr};
+    AudioIO* m_audioIO {nullptr};
 
     const AVOutputFormat* m_fmt   {nullptr};
     AVFormatContext* m_output_format_context {nullptr};
-    OutputStream m_video_stream { 0 };
-    OutputStream m_audio_stream { 0 };
+    OutputStream m_video_stream { }; // Removed '0' initialization for struct
+    OutputStream m_audio_stream { };
 
     int              m_verbose;
     bool             m_discard_images         {false};
@@ -186,8 +188,8 @@ class OutputTS
     AVColorSpace                  m_color_space       {AVCOL_SPC_NB};
     AVColorTransferCharacteristic m_color_trc         {AVCOL_TRC_NB};
     AVColorPrimaries              m_color_primaries   {AVCOL_PRI_NB};
-    AVMasteringDisplayMetadata*   m_display_primaries {nullptr};
-    AVContentLightMetadata*       m_content_light     {nullptr};
+    AVMasteringDisplayMetadata* m_display_primaries {nullptr};
+    AVContentLightMetadata* m_content_light     {nullptr};
 
     std::mutex              m_container_mutex;
 
@@ -211,6 +213,7 @@ class OutputTS
     std::atomic<bool>       m_init_needed  {true};
     std::mutex              m_ready_mutex;
     std::condition_variable m_ready_cond;
+    std::atomic<int64_t> m_first_timestamp {-1};
 };
 
 #endif
