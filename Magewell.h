@@ -42,7 +42,7 @@ class Magewell
 
     bool Capture(const std::string & video_codec, const std::string & preset,
                  int quality, int look_ahead, bool no_audio, bool p010,
-                 const std::string & gpu_device);
+                 const std::string & gpu_device, const std::string & output_filename );
     void Shutdown(void);
     void Reset(void);
 
@@ -134,3 +134,4 @@ class Magewell
 };
 
 #endif
+

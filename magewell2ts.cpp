@@ -20,6 +20,10 @@
  * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
+ 
+ 
+    - Added file output option -f
+    - Added libx264 support 
  */
 
 #include <string_view>
@@ -79,6 +83,7 @@ void show_help(string_view app)
          << "--lookahead (-a)   : How many frames to 'look ahead' [35]\n"
          << "--quality (-q)     : quality setting [25]\n"
          << "--preset (-p)      : encoder preset\n"
+         << "--file (-f)        : output filename\n"
          << "--p010             : Force p010 (10bit) video format.\n"
          << "--write-edid (-w)  : Write EDID info from file to input\n"
          << "--wait-for         : Wait for given number of inputs to be initialized. 10 second timeout\n";
@@ -116,35 +121,36 @@ bool string_to_int(string_view st, int &value, string_view var)
 
 int main(int argc, char* argv[])
 {
-//    parse_cmd(argc, argv);
-
+    //    parse_cmd(argc, argv);
+    
     int    ret = 0;
     int    boardId  = -1;
     int    devIndex = -1;
-
+    
     string_view app_name = argv[0];
     string      edid_file;
     string      video_codec = "libx264";
     string      device      = "renderD128";
-
+    string output_file = "pipe:1"; // Default to stdout
+    
     bool        get_volume  = false;
     int         set_volume  = -1;
-
+    
     bool        list_inputs = false;
     bool        do_capture  = false;
     bool        read_edid   = false;
     bool        write_edid  = false;
-
-    string      preset;
-    int         quality       = 20;
+    
+    string      preset = "ultrafast";
+    int         quality       = 25;
     int         look_ahead    = -1;
     bool        no_audio      = false;
     bool        p010          = false;
-
+    
     std::cerr << mutex_init_own;
-
+    
     vector<string_view> args(argv + 1, argv + argc);
-
+    
     {
         struct sigaction action;
         action.sa_handler = signal_handler;
@@ -155,7 +161,7 @@ int main(int argc, char* argv[])
         sigaction(SIGHUP, &action, NULL);
         sigaction(SIGUSR1, &action, NULL);
     }
-
+    
     for (auto iter = args.begin(); iter != args.end(); ++iter)
     {
         if (*iter == "-h" || *iter == "--help")
@@ -189,6 +195,11 @@ int main(int argc, char* argv[])
         {
             if (!string_to_int(*(++iter), devIndex, "device index"))
                 exit(1);
+        }
+        else if (*iter == "-f" || *iter == "--file")
+        {
+            if (iter + 1 != args.end())
+                output_file = *(++iter);
         }
         else if (*iter == "-b" || *iter == "--board")
         {
@@ -255,25 +266,25 @@ int main(int argc, char* argv[])
             exit(1);
         }
     }
-
+    
     if (!g_mw)
         return -1;
-
+    
     if (list_inputs)
         g_mw.ListInputs();
-
+    
     if (devIndex < 1)
         return 0;
-
+    
     if (!g_mw.OpenChannel(devIndex - 1, boardId))
         return -1;
-
+    
     if (get_volume)
         g_mw.DisplayVolume();
     if (set_volume >= 0)
         if (!g_mw.SetVolume(set_volume))
             return -1;
-
+    
     if (!edid_file.empty())
     {
         if (read_edid)
@@ -287,13 +298,14 @@ int main(int argc, char* argv[])
                 return -1;
         }
     }
-
+    
     if (do_capture)
     {
         if (!g_mw.Capture(video_codec, preset, quality, look_ahead,
-                          no_audio, p010, device))
+                          no_audio, p010, device, output_file))
             return -2;
     }
-
+    
     return ret;
+    
 }

@@ -42,7 +42,7 @@ using namespace std;
 using namespace s6_lock_ios;
 
 // --- A/V SYNC GLOBALS ---
-// We use independent anchors for Audio and Video to ensure
+// Independent anchors for Audio and Video to ensure
 // both start at PTS 0, regardless of hardware clock offsets.
 static std::atomic<int64_t> g_video_start_ts{-1};
 static std::atomic<int64_t> g_audio_start_ts{-1};
@@ -63,7 +63,7 @@ static std::string AV_ts2str(int64_t ts) {
 OutputTS::OutputTS(int verbose_level, const string & video_codec_name,
                    const string & preset, int quality, int look_ahead,
                    bool no_audio, bool p010, const string & device,
-                   ShutdownCallback shutdown, ResetCallback reset,
+                   const string & output_filename, ShutdownCallback shutdown, ResetCallback reset,
                    MagCallback image_buffer_avail)
     : m_verbose(verbose_level)
     , m_no_audio(no_audio)
@@ -73,12 +73,13 @@ OutputTS::OutputTS(int verbose_level, const string & video_codec_name,
     , m_quality(quality)
     , m_look_ahead(look_ahead)
     , m_p010(p010)
+    , m_filename(output_filename)
     , f_shutdown(shutdown)
     , f_reset(reset)
     , f_image_buffer_available(image_buffer_avail)
 {
     // RESET SYNC ANCHORS ON NEW SESSION
-    // This is critical for the "Audio Changing" event
+    // "Audio Changing" event
     g_video_start_ts.store(-1);
     g_audio_start_ts.store(-1);
 
@@ -191,7 +192,7 @@ bool OutputTS::open_video(void)
     m_video_stream.enc = avcodec_alloc_context3(video_codec);
     m_video_stream.enc->width = m_input_width;
     m_video_stream.enc->height = m_input_height;
-    // FIX: Set BOTH time_base and framerate
+    // Set BOTH time_base and framerate
     // Encoder timebase should be the inverse of the framerate (1/60, etc.)
     m_video_stream.enc->time_base = av_inv_q(m_input_frame_rate);
     m_video_stream.enc->framerate = m_input_frame_rate;
@@ -244,6 +245,13 @@ bool OutputTS::open_container(void)
     if (!(m_fmt->flags & AVFMT_NOFILE)) {
         if (avio_open(&m_output_format_context->pb, m_filename.c_str(), AVIO_FLAG_WRITE) < 0) return false;
     }
+    if (!(m_output_format_context->oformat->flags & AVFMT_NOFILE)) {
+            // Use the filename member instead of hardcoded pipe:1
+            if (avio_open(&m_output_format_context->pb, m_filename.c_str(), AVIO_FLAG_WRITE) < 0) {
+                cerr << "Could not open output file: " << m_filename << endl;
+                return false;
+            }
+    }
     avformat_write_header(m_output_format_context, NULL);
     m_init_needed = false;
     return true;
@@ -275,25 +283,20 @@ bool OutputTS::open_x264(const AVCodec *codec, OutputStream *ost, AVDictionary *
     if (opt_arg) av_dict_copy(&opt, opt_arg, 0);
     
     AVCodecContext* c = ost->enc;
-    // Set format to Planar 4:2:2
     c->pix_fmt = AV_PIX_FMT_YUV422P;
-
-    // --- CRF AND RATE CONTROL CHANGES ---
-        // Setting CRF to 0 enables lossless mode in x264.
-        // Note: When using CRF, you usually don't set bit_rate or rc_max_rate.
-    av_dict_set(&opt, "crf", "0", 0);
+    av_dict_set(&opt, "crf", "1", 0);
     
     c->bit_rate = 7000000;
     c->rc_max_rate = 12000000;
-    c->rc_min_rate = 4000000;
+    c->rc_min_rate = 5000000;
     c->rc_buffer_size = 12000000;
     
     c->colorspace = AVCOL_SPC_BT709;
     c->color_primaries = AVCOL_PRI_BT709;
     c->color_trc = AVCOL_TRC_BT709;
     c->color_range = AVCOL_RANGE_MPEG;
+    
 
-    // Use high422 profile for 4:2:2 support
     av_dict_set(&opt, "profile", "high422", 0);
     av_dict_set(&opt, "preset", "ultrafast", 0);
     av_dict_set(&opt, "preset", m_preset.c_str(), 0);
@@ -314,7 +317,7 @@ bool OutputTS::open_x264(const AVCodec *codec, OutputStream *ost, AVDictionary *
     return true;
 }
 
-// ... [Stubbed GPU functions] ...
+// ... [Removed GPU functions as I dont use Todo add id needed] ...
 bool OutputTS::open_nvidia(const AVCodec*, OutputStream*, AVDictionary*) { return false; }
 bool OutputTS::open_vaapi(const AVCodec*, OutputStream*, AVDictionary*) { return false; }
 bool OutputTS::open_qsv(const AVCodec*, OutputStream*, AVDictionary*) { return false; }
@@ -364,8 +367,6 @@ void OutputTS::mux(void) {
     }
 }
 
-// --- SYNC & COPY LOGIC ---
-
 void OutputTS::copy_to_frame()
 {
     struct SwsContext* sws_ctx = nullptr;
@@ -393,17 +394,17 @@ void OutputTS::copy_to_frame()
         int idx = ost->frames_idx_in;
         AVFrame* dest = ost->frames[idx].frame;
 
-        // Scaler: Packed YUY2 -> Planar YUV422P
+        // Scaler: Packed YUY2 -> Planar YUV422 Flipping pain...
         if (m_encoderType == EncoderType::X264) {
             if (!sws_ctx) {
-                // Correctly identify input as Packed 4:2:2 (YUY2)
-                sws_ctx = sws_getContext(m_input_width, m_input_height, AV_PIX_FMT_YUYV422,
-                                         ost->enc->width, ost->enc->height, ost->enc->pix_fmt,
+                sws_ctx = sws_getContext(m_input_width, m_input_height,
+                                         AV_PIX_FMT_YUYV422, // The Magewell input format
+                                         ost->enc->width, ost->enc->height,
+                                         AV_PIX_FMT_YUV422P, // The x264 encoder format
                                          SWS_BILINEAR, nullptr, nullptr, nullptr);
             }
             uint8_t* src_data[4] = { pkt.image, nullptr, nullptr, nullptr };
-            // YUY2 is 16 bits (2 bytes) per pixel
-            int src_linesize[4] = { m_input_width * 2, 0, 0, 0 };
+            int src_linesize[4] = { m_input_width * 2, 0, 0, 0 }; // Correct for packed YUYV
             sws_scale(sws_ctx, src_data, src_linesize, 0, m_input_height, dest->data, dest->linesize);
         }
 
@@ -436,7 +437,6 @@ void OutputTS::copy_to_frame()
     if (sws_ctx) sws_freeContext(sws_ctx);
 }
 
-// --- AUDIO SYNC LOGIC ---
 
 AVFrame* OutputTS::get_pcm_audio_frame(OutputStream* ost)
 {
@@ -467,7 +467,6 @@ AVFrame* OutputTS::get_pcm_audio_frame(OutputStream* ost)
     return frame;
 }
 
-// ... [Wrappers kept same] ...
 bool OutputTS::setVideoParams(int w, int h, bool i, AVRational tb, double dur, AVRational fr, bool hdr) {
     m_input_width = w; m_input_height = h; m_interlaced = i; m_input_time_base = tb; m_input_frame_rate = fr; m_isHDR = hdr; m_input_frame_duration = dur;
     m_frame_buffers = 10;
@@ -504,7 +503,7 @@ bool OutputTS::write_frame(AVFormatContext* fmt_ctx, AVCodecContext* codec_ctx, 
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
         if (ret < 0) return false;
 
-        // FIX: Rescale from Encoder Timebase to Stream Timebase
+        // Rescale from Encoder Timebase to Stream Timebase
         // This ensures the MPEG-TS muxer gets the correct 90kHz values.
         av_packet_rescale_ts(ost->tmp_pkt, codec_ctx->time_base, ost->st->time_base);
         

@@ -30,7 +30,7 @@ class OutputTS
     OutputTS(int verbose, const std::string & video_codec_name,
              const std::string & preset, int quality, int look_ahead,
              bool no_audio, bool p010, const std::string & device,
-             ShutdownCallback shutdown, ResetCallback reset,
+             const std::string & output_filename, ShutdownCallback shutdown, ResetCallback reset,
              MagCallback image_buffer_avail);
     ~OutputTS(void);
 
